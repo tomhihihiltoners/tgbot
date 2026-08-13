@@ -53,17 +53,18 @@ def handle_video(message):
         BLUR_SIGMA = 20      # Сила ореола свечения
         BLOOM_OPACITY = 0.65 # Степень заляпанности
 
-        # 3. Команда FFmpeg с исправленными точками с запятой
+        # 3. Чистая и стабильная цепочка FFmpeg
+        filter_str = (
+            "[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,split=2[main][blur];"
+            f"[blur]gblur=sigma={BLUR_SIGMA},eq=contrast=1.3:brightness=0.08[glow];"
+            f"[main][glow]blend=all_mode=screen:opacity={BLOOM_OPACITY}[blended];"
+            "[blended]eq=contrast=0.72:brightness=0.08:saturation=0.85,vignette=angle=0.45"
+        )
+
         ffmpeg_cmd = [
             'ffmpeg', '-y',
             '-i', input_path,
-            '-filter_complex', (
-                '[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,split=2[main][blur];'
-                f'[blur]gblur=sigma={BLUR_SIGMA},eq=contrast=1.3:brightness=0.08[glow];'
-                f'[main][glow]blend=all_mode=screen:opacity={BLOOM_OPACITY},'
-                'eq=contrast=0.72:brightness=0.08:saturation=0.85,'
-                'vignette=angle=0.45'
-            ),
+            '-filter_complex', filter_str,
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-crf', '26',
