@@ -40,19 +40,32 @@ def handle_video(message):
         f.write(downloaded_file)
 
     # Обработка через FFmpeg
-    ffmpeg_cmd = [
-        'ffmpeg', '-y',
-        '-i', input_path,
-        '-vf', 'scale=180:180:force_original_aspect_ratio=increase,crop=180:180,fps=12',
-        '-c:v', 'libx264',
-        '-b:v', '35k',
-        '-preset', 'ultrafast',
-        '-c:a', 'aac',
-        '-b:a', '12k',
-        '-ar', '8000',
-        '-af', 'volume=6dB',
-        output_path
-    ]
+# Настройки эффекта
+BLUR_SIGMA = 20      # Сила ореола свечения (15-30)
+BLOOM_OPACITY = 0.65 # Насколько сильно рассеивается свет от жира (0.3 - слабенько, 0.8 - конкретно заляпана)
+
+ffmpeg_cmd = [
+    'ffmpeg', '-y',
+    '-i', input_path,
+    '-filter_complex', (
+        # 1. Приводим к 512x512 и дублируем поток на 2 слоя ([main] и [blur])
+        '[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,split=2[main][blur],'
+        
+        # 2. Размываем второй слой и задираем ему яркость (это наши жирные блики)
+        f'[blur]gblur=sigma={BLUR_SIGMA},eq=contrast=1.3:brightness=0.08[glow];'
+        
+        # 3. Смешиваем основной кадр и свечение в режиме "screen",
+        # затем роняем контраст (eq) и добавляем затемнение по краям (vignette)
+        f'[main][glow]blend=all_mode=screen:opacity={BLOOM_OPACITY},'
+        'eq=contrast=0.72:brightness=0.08:saturation=0.85,'
+        'vignette=angle=0.45'
+    ),
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-crf', '26',
+    '-c:a', 'aac',
+    output_path
+]
     
     subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
