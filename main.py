@@ -18,7 +18,7 @@ def get_message():
     bot.process_new_updates([update])
     return '!', 200
 
-# Главная страница для автоматической привязки Webhook
+# Главная страница для привязки Webhook
 @app.route('/')
 def webhook_setup():
     if RENDER_URL and TOKEN:
@@ -37,12 +37,11 @@ def handle_video(message):
     chat_id = message.chat.id
     status_msg = bot.send_message(chat_id, "Обрабатываю видео... ⏳")
 
-    # Уникальные имена файлов, чтобы запросы пользователей не пересекались
     input_path = f"/tmp/input_{chat_id}_{message.message_id}.mp4"
     output_path = f"/tmp/output_{chat_id}_{message.message_id}.mp4"
 
     try:
-        # 1. Скачиваем входящее видео
+        # 1. Скачиваем видео
         file_id = message.video_note.file_id if message.video_note else message.video.file_id
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -50,17 +49,17 @@ def handle_video(message):
         with open(input_path, 'wb') as f:
             f.write(downloaded_file)
 
-        # 2. Настройки эффекта "Заляпанная камера"
-        BLUR_SIGMA = 20      # Сила ореола свечения (15-30)
-        BLOOM_OPACITY = 0.65 # Степень заляпанности (0.3 - слабая, 0.8 - сильная)
+        # 2. Настройки эффекта
+        BLUR_SIGMA = 20      # Сила ореола свечения
+        BLOOM_OPACITY = 0.65 # Степень заляпанности
 
-        # 3. Команда FFmpeg (исправлена запятая на строке фильтра glow)
+        # 3. Команда FFmpeg с исправленными точками с запятой
         ffmpeg_cmd = [
             'ffmpeg', '-y',
             '-i', input_path,
             '-filter_complex', (
                 '[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,split=2[main][blur];'
-                f'[blur]gblur=sigma={BLUR_SIGMA},eq=contrast=1.3:brightness=0.08[glow],'
+                f'[blur]gblur=sigma={BLUR_SIGMA},eq=contrast=1.3:brightness=0.08[glow];'
                 f'[main][glow]blend=all_mode=screen:opacity={BLOOM_OPACITY},'
                 'eq=contrast=0.72:brightness=0.08:saturation=0.85,'
                 'vignette=angle=0.45'
@@ -74,11 +73,10 @@ def handle_video(message):
 
         subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-        # 4. Отправка результата в виде кружка
+        # 4. Отправка результата
         with open(output_path, 'rb') as video_note:
             bot.send_video_note(chat_id, video_note)
 
-        # Удаляем временное сообщение "Обрабатываю..."
         bot.delete_message(chat_id, status_msg.message_id)
 
     except Exception as e:
@@ -92,6 +90,5 @@ def handle_video(message):
             os.remove(output_path)
 
 if __name__ == '__main__':
-    # Render передает порт в переменную PORT
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
