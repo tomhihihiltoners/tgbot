@@ -114,27 +114,23 @@ def handle_video(message):
         #     немного увеличиваем громкость
 
         af_chain = (
-            "aresample=6000,"
-            "aresample=44100,"
-            "highpass=f=350,"
-            "lowpass=f=3000,"
-            "acompressor="
-            "threshold=0.12:"
-            "ratio=20:"
-            "attack=1:"
-            "release=25:"
-            "makeup=7,"
-            "acrusher="
-            "bits=5:"
-            "mix=1:"
-            "mode=lin,"
-            "acrusher="
-            "bits=6:"
-            "mix=0.65:"
-            "mode=lin,"
-            "alimiter=limit=0.55,"
-            "volume=1.8"
-            )
+        "aresample=4000,"
+        "aresample=44100,"
+        "highpass=f=500,"
+        "lowpass=f=2600,"
+        "acompressor="
+        "threshold=0.08:"
+        "ratio=30:"
+        "attack=1:"
+        "release=15:"
+        "makeup=8,"
+        "acrusher="
+        "bits=4:"
+        "mix=1:"
+        "mode=lin,"
+        "alimiter=limit=0.45,"
+        "volume=2.0"
+        )
 
         # ============================================================
         # 4. FFmpeg
