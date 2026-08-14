@@ -9,12 +9,14 @@ RENDER_URL = os.getenv('RENDER_EXTERNAL_URL')
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+
 @app.route('/' + TOKEN, methods=['POST'])
 def get_message():
     json_string = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_string)
     bot.process_new_updates([update])
     return '!', 200
+
 
 @app.route('/')
 def webhook_setup():
@@ -23,6 +25,7 @@ def webhook_setup():
         bot.remove_webhook()
         bot.set_webhook(url=webhook_url)
         return f"Webhook успешно установлен на {webhook_url}", 200
+
     return "Сервер работает!", 200
 
 
@@ -37,6 +40,7 @@ def start_cmd(message):
 @bot.message_handler(content_types=['video_note', 'video'])
 def handle_video(message):
     chat_id = message.chat.id
+
     status_msg = bot.send_message(
         chat_id,
         "Обрабатываю видео... ⏳"
@@ -46,7 +50,10 @@ def handle_video(message):
     output_path = f"/tmp/output_{chat_id}_{message.message_id}.mp4"
 
     try:
-        # 1. Скачиваем видео
+        # ============================================================
+        # 1. СКАЧИВАЕМ ВИДЕО
+        # ============================================================
+
         file_id = (
             message.video_note.file_id
             if message.video_note
@@ -59,11 +66,9 @@ def handle_video(message):
         with open(input_path, 'wb') as f:
             f.write(downloaded_file)
 
-        # 2. ВИДЕО-ФИЛЬТР
-        # scale -> приводим к квадрату 512x512
-        # boxblur -> размытие
-        # eq -> белёсая/грязная картинка
-        # vignette -> затемнение по краям
+        # ============================================================
+        # 2. ФИЛЬТР ВИДЕО
+        # ============================================================
 
         vf_chain = (
             "scale=512:512:force_original_aspect_ratio=increase,"
@@ -73,27 +78,36 @@ def handle_video(message):
             "vignette=angle=0.45"
         )
 
-        # 3. АУДИО-ФИЛЬТР
+        # ============================================================
+        # 3. ФИЛЬТР ЗВУКА
+        # ============================================================
+        #
+        # Делаем звук похожим на плохой/перегруженный микрофон:
         #
         # aresample=11025
         #     ↓
-        #     намеренно ухудшаем качество звука
+        #     искусственно ухудшаем исходный звук
         #
         # aresample=44100
         #     ↓
-        #     возвращаем частоту обратно
+        #     возвращаем стандартную частоту
         #
-        # highpass / lowpass
+        # highpass=180
         #     ↓
-        #     убираем часть частот
+        #     убираем очень низкие частоты
+        #
+        # lowpass=6500
+        #     ↓
+        #     убираем верхние частоты
         #
         # acompressor
         #     ↓
-        #     сильно сжимаем динамический диапазон
+        #     сильно сжимаем звук
         #
-        # overdrive
+        # alimiter
         #     ↓
-        #     лёгкий цифровой перегруз/искажение
+        #     ограничиваем пики и создаём эффект
+        #     слегка перегруженного микрофона
         #
         # volume
         #     ↓
@@ -110,39 +124,81 @@ def handle_video(message):
             "attack=5:"
             "release=80:"
             "makeup=2,"
-            "overdrive=drive=6:colour=20,"
+            "alimiter=limit=0.85,"
             "volume=1.15"
         )
 
+        # ============================================================
         # 4. FFmpeg
+        # ============================================================
+
         ffmpeg_cmd = [
             'ffmpeg',
             '-y',
+
+            # Вход
             '-i', input_path,
 
-            # Видео
+            # ---------------- VIDEO ----------------
+
             '-vf', vf_chain,
+
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-crf', '26',
 
-            # Звук
+            # ---------------- AUDIO ----------------
+
             '-af', af_chain,
+
             '-c:a', 'aac',
             '-b:a', '64k',
 
-            # Выход
+            # ---------------- OUTPUT ----------------
+
             output_path
         ]
 
-        subprocess.run(
+        # Запускаем FFmpeg.
+        # stderr сохраняем, чтобы при ошибке видеть причину.
+
+        result = subprocess.run(
             ffmpeg_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
 
-        # 5. Отправка результата
+        # ============================================================
+        # 5. ПРОВЕРЯЕМ FFmpeg
+        # ============================================================
+
+        if result.returncode != 0:
+
+            # Берём последние строки ошибки FFmpeg
+            error_log = result.stderr[-3000:]
+
+            print("========== FFMPEG ERROR ==========")
+            print(error_log)
+            print("==================================")
+
+            raise Exception(
+                f"FFmpeg завершился с ошибкой.\n\n{error_log}"
+            )
+
+        # ============================================================
+        # 6. ПРОВЕРЯЕМ, ЧТО ФАЙЛ СОЗДАЛСЯ
+        # ============================================================
+
+        if not os.path.exists(output_path):
+            raise Exception(
+                "FFmpeg не создал выходной файл."
+            )
+
+        # ============================================================
+        # 7. ОТПРАВЛЯЕМ РЕЗУЛЬТАТ
+        # ============================================================
+
         with open(output_path, 'rb') as video_note:
             bot.send_video_note(
                 chat_id,
@@ -155,14 +211,27 @@ def handle_video(message):
             status_msg.message_id
         )
 
+    # ================================================================
+    # 8. ОБРАБОКА ОШИБКИ
+    # ================================================================
+
     except Exception as e:
+
+        print("========== ERROR ==========")
+        print(e)
+        print("============================")
+
         bot.send_message(
             chat_id,
-            f"Произошла ошибка при обработке: {e}"
+            f"Произошла ошибка при обработке:\n\n{e}"
         )
 
+    # ================================================================
+    # 9. УДАЛЯЕМ ВРЕМЕННЫЕ ФАЙЛЫ
+    # ================================================================
+
     finally:
-        # 6. Чистка файлов
+
         if os.path.exists(input_path):
             os.remove(input_path)
 
@@ -170,8 +239,16 @@ def handle_video(message):
             os.remove(output_path)
 
 
+# ====================================================================
+# ЗАПУСК FLASK
+# ====================================================================
+
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
+
+    port = int(
+        os.getenv('PORT', 5000)
+    )
+
     app.run(
         host='0.0.0.0',
         port=port
